@@ -1,0 +1,9 @@
+[master]
+100.27.200.1
+
+[slave]
+100.27.200.2
+
+[nodes:children]
+master
+slave

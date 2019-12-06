@@ -1,0 +1,32 @@
+#!/bin/sh
+
+echo -e "\n### Get routes by IP ###\n"
+
+echo "User-Name = \"79240123456\"
+User-Password = \"password\"
+Framed-IP-Address = 10.27.216.90
+NAS-Port-Type = Virtual
+Calling-Station-Id = \"79240123456\"
+Called-Station-Id = \"test.dv\"
+Service-Type = Framed-User
+Framed-Protocol = GPRS-PDP-Context" | awk '{printf "%s,",$0}' | sed -r 's/"//g' | sed -r 's/,$//g' | radclient -x {{ ldap_provider_host }}:1812 auth {{ radius_secret }}
+
+echo -e "\n### Get routes by MSISDN ###\n"
+
+echo "User-Name = \"79246543210\"
+User-Password = \"password\"
+NAS-Port-Type = Virtual
+Calling-Station-Id = \"79246543210\"
+Called-Station-Id = \"test.dv\"
+Service-Type = Framed-User
+Framed-Protocol = GPRS-PDP-Context" | awk '{printf "%s,",$0}' | sed -r 's/"//g' | sed -r 's/,$//g' | radclient -x {{ ldap_provider_host }}:1812 auth {{ radius_secret }}
+
+echo -e "\n### Get routes by unknown MSISDN ###\n"
+
+echo "User-Name = \"79240123456\"
+User-Password = \"password\"
+NAS-Port-Type = Virtual
+Calling-Station-Id = \"79240123456\"
+Called-Station-Id = \"test.dv\"
+Service-Type = Framed-User
+Framed-Protocol = GPRS-PDP-Context" | awk '{printf "%s,",$0}' | sed -r 's/"//g' | sed -r 's/,$//g' | radclient -x {{ ldap_provider_host }}:1812 auth {{ radius_secret }}

@@ -1,0 +1,15 @@
+---
+ldap_domain: 'dc=telecom,dc=ru'
+ldap_root_pw_plain: X44Yc4NJ
+ldap_root_pw_encrypted: '{SSHA}eKlFDrGH9AyVHgMxFZDQzymj94p5li8D'
+
+vrrp_ext_vip: 200.0.0.1/32
+vrrp_ext_vrid: 107
+vrrp_pass: thKe60V4
+
+radius_secret: telecomdv
+radius_client:
+ - { name: cluster-internal, ip: 100.0.0.0/30, secret: telecomdv }
+ - { name: cluster-external, ip: 200.0.0.0/28, secret: telecomdv }
+ - { name: vugw01, ip: 10.27.100.200/32, secret: huawei }
+ - { name: vugw02, ip: 10.38.100.200/32, secret: huawei }

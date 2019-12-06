@@ -1,0 +1,12 @@
+# -*- text -*-
+##
+## clients.conf -- client configuration directives
+##
+##	$Id: 76b300d3c55f1c5c052289b76bf28ac3a370bbb2 $
+
+{% for client in radius_client %}
+client {{client.name}} {
+	ipaddr = {{client.ip}}
+	secret = {{client.secret}}
+}
+{% endfor %}

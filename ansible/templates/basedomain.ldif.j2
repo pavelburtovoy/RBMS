@@ -1,0 +1,54 @@
+dn: {{ ldap_domain }}
+objectClass: organization
+objectClass: dcObject
+objectClass: top
+dc: telecom
+o: telecom
+
+dn: cn=manager,{{ ldap_domain }}
+objectClass: organizationalRole
+cn: manager
+description: Directory Manager
+
+dn: ou=apn,{{ ldap_domain }}
+objectClass: organizationalUnit
+ou: apn
+
+dn: ou=test.dv,ou=apn,{{ ldap_domain }}
+objectClass: top
+objectClass: organizationalUnit
+ou: test.dv
+
+dn: ou=msisdn,ou=test.dv,ou=apn,{{ ldap_domain }}
+objectClass: organizationalUnit
+ou: msisdn
+
+dn: uid=79246543210,ou=msisdn,ou=test.dv,ou=apn,{{ ldap_domain }}
+objectClass: shadowAccount
+objectClass: radiusprofile
+objectClass: radiusObjectProfile
+objectClass: top
+objectClass: uidObject
+cn: 79246543210
+uid: 79246543210
+radiusReplyAttribute: Framed-Route = 10.0.3.0/24
+userPassword:: e01ENX1YMDNNTzFxblpkWWRneWZldUlMUG1RPT0=
+
+dn: ou=route,ou=test.dv,ou=apn,{{ ldap_domain }}
+objectClass: organizationalUnit
+ou: route
+
+dn: cn=10.27.216.90,ou=route,ou=test.dv,ou=apn,{{ ldap_domain }}
+objectClass: radiusprofile
+objectClass: top
+objectClass: radiusObjectProfile
+cn: 10.27.216.90
+radiusFramedRoute: 10.0.0.0/24
+radiusFramedRoute: 10.0.1.0/24
+
+dn: cn=10.27.216.91,ou=route,ou=test.dv,ou=apn,{{ ldap_domain }}
+objectClass: radiusprofile
+objectClass: top
+objectClass: radiusObjectProfile
+cn: 10.27.216.91
+radiusFramedRoute: 10.0.2.0/24

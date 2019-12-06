@@ -1,0 +1,445 @@
+#
+# (c)2019 by Pavel Burtovoy <pavel.burtovoy@burtovoy.su>
+#
+
+- hosts: nodes
+  remote_user: root
+  order: inventory
+  tasks:
+    - name: 'install packages'
+      yum:
+        name="{{packages}}"
+        state=present
+      vars:
+        packages:
+        - openldap
+        - openldap-clients
+        - openldap-servers
+        - freeradius
+        - freeradius-doc
+        - freeradius-ldap
+        - freeradius-perl
+        - freeradius-utils
+        - keepalived
+        - perl-LDAP
+
+    - name: 'open ldap service port'
+      firewalld:
+        service: ldap
+        permanent: yes
+        immediate: yes
+        state: enabled
+      tags:
+        - ldap
+
+    - name: 'copy DB config'
+      copy:
+        remote_src: yes
+        src: /usr/share/openldap-servers/DB_CONFIG.example
+        dest: /var/lib/ldap/DB_CONFIG
+        owner: ldap
+      tags:
+        - ldap
+
+    - name: 'enable openldap service'
+      systemd:
+        name: slapd
+        enabled: yes
+        masked: no
+      tags:
+        - ldap
+
+    - name: 'restart openldap'
+      service: name=slapd state=restarted
+      tags:
+        - ldap
+
+    - name: 'generate password'
+      command: slappasswd -s {{ ldap_root_pw_plain }}
+      register: ldap_root_pw_gen
+      when: ldap_root_pw_encrypted is undefined
+      tags:
+        - ldap
+
+    - name: 'store password in variable'
+      set_fact:
+        ldap_root_pw_encrypted: "{{ ldap_root_pw_gen.stdout }}"
+      when: ldap_root_pw_encrypted is undefined
+      tags:
+        - ldap
+
+    - name: 'check current password'
+      command: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config olcDatabase=config 1>/dev/null
+      register: ldap_root_pw_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'make chrootpw.ldif'
+      template:
+        src: templates/chrootpw.ldif.j2
+        dest: /run/chrootpw.ldif
+      when: ldap_root_pw_check is failed
+      tags:
+        - ldap
+
+    - name: 'change root password'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /run/chrootpw.ldif
+      when: ldap_root_pw_check is failed
+      tags:
+        - ldap
+
+    - name: 'check schema cosine exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config objectClass="olcSchemaConfig" | egrep "cn:.*}cosine" 1>/dev/null
+      register: schema_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'import schema: cosine'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/openldap/schema/cosine.ldif
+      when: schema_check is failed
+      tags:
+        - ldap
+
+    - name: 'check schema nis exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config objectClass="olcSchemaConfig" | egrep "cn:.*}nis" 1>/dev/null
+      register: schema_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'import schema: nis'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/openldap/schema/nis.ldif
+      when: schema_check is failed
+      tags:
+        - ldap
+
+    - name: 'check schema inetorgperson exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config objectClass="olcSchemaConfig" | egrep "cn:.*}inetorgperson" 1>/dev/null
+      register: schema_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'import schema: inetorgperson'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/openldap/schema/inetorgperson.ldif
+      when: schema_check is failed
+      tags:
+        - ldap
+
+    - name: 'check schema radius exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config objectClass="olcSchemaConfig" | egrep "cn:.*}radius" 1>/dev/null
+      register: schema_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'import schema: radius'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /usr/share/doc/freeradius-3.0.13/schemas/ldap/openldap/freeradius.ldif
+      when: schema_check is failed
+      tags:
+        - ldap
+
+    - name: 'import schema: radiusClients'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /usr/share/doc/freeradius-3.0.13/schemas/ldap/openldap/freeradius-clients.ldif
+      when: schema_check is failed
+      tags:
+        - ldap
+
+    - name: 'check domain config exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config olcSuffix={{ ldap_domain }} | grep "numEntries" 1>/dev/null
+      register: domain_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'make chdomain.ldif'
+      template:
+        src: templates/chdomain.ldif.j2
+        dest: /run/chdomain.ldif
+      when: domain_check is failed
+      tags:
+        - ldap
+
+    - name: 'change domain'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /run/chdomain.ldif
+      when: domain_check is failed
+      tags:
+        - ldap
+
+    - name: 'check basedomain exist'
+      shell: ldapsearch -x -D cn=manager,{{ ldap_domain }} -w {{ ldap_root_pw_plain }} -b {{ ldap_domain }} cn=manager | grep "numEntries" 1>/dev/null
+      register: basedomain_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'make basedomain.ldif'
+      template:
+        src: templates/basedomain.ldif.j2
+        dest: /run/basedomain.ldif
+      when: basedomain_check is failed
+      tags:
+        - ldap
+
+    - name: 'add base domain'
+      command: ldapadd -x -D cn=manager,{{ ldap_domain }} -w {{ ldap_root_pw_plain }} -f /run/basedomain.ldif
+      when: basedomain_check is failed
+      tags:
+        - ldap
+
+    - name: 'check syncprov module config exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config olcModuleLoad=syncprov.la | grep "numEntries" 1>/dev/null
+      register: mod_syncprov_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'copy mod_syncprov.ldif'
+      copy:
+        src: files/mod_syncprov.ldif
+        dest: /run/mod_syncprov.ldif
+      when: mod_syncprov_check is failed
+      tags:
+        - ldap
+
+    - name: 'add syncprov module'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /run/mod_syncprov.ldif
+      when: mod_syncprov_check is failed
+      tags:
+        - ldap
+
+    - name: 'check syncprov overlay config exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config olcOverlay=syncprov | grep "numEntries" 1>/dev/null
+      register: syncprov_check
+      ignore_errors: true
+      tags:
+        - ldap
+
+    - name: 'copy syncprov.ldif'
+      copy:
+        src: files/syncprov.ldif
+        dest: /run/syncprov.ldif
+      when: syncprov_check is failed
+      tags:
+        - ldap
+
+    - name: 'config syncprov module'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /run/syncprov.ldif
+      when: syncprov_check is failed
+      tags:
+        - ldap
+
+- hosts: master
+  remote_user: root
+  order: inventory
+  tasks:
+    - name: 'check replication config exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config olcSyncrepl=* | grep "numEntries" 1>/dev/null
+      register: syncrepl_check
+      ignore_errors: true
+      tags:
+        - ldap
+        - master
+
+    - name: 'make master.ldif'
+      template:
+        src: templates/master.ldif.j2
+        dest: /run/master.ldif
+      when: syncrepl_check is failed
+      tags:
+        - ldap
+        - master
+
+    - name: 'config replication'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /run/master.ldif
+      when: syncrepl_check is failed
+      tags:
+        - ldap
+        - master
+
+- hosts: slave
+  remote_user: root
+  order: inventory
+  tasks:
+    - name: 'check replication config exist'
+      shell: ldapsearch -x -D cn=config -w {{ ldap_root_pw_plain }} -b cn=config olcSyncrepl=* | grep "numEntries" 1>/dev/null
+      register: syncrepl_check
+      ignore_errors: true
+      tags:
+        - ldap
+        - slave
+
+    - name: 'make master.ldif'
+      template:
+        src: templates/master.ldif.j2
+        dest: /run/master.ldif
+      when: syncrepl_check is failed
+      tags:
+        - ldap
+        - slave
+
+    - name: 'config replication'
+      command: ldapadd -Y EXTERNAL -H ldapi:/// -f /run/master.ldif
+      when: syncrepl_check is failed
+      tags:
+        - ldap
+        - slave
+
+- hosts: nodes
+  remote_user: root
+  order: inventory
+  tasks:
+    - name: 'open radius service port'
+      firewalld:
+        service: radius
+        permanent: yes
+        immediate: yes
+        state: enabled
+      tags:
+        - radius
+
+    - name: 'copy radius default site config'
+      copy:
+        src: files/raddb/sites-available/default
+        dest: /etc/raddb/sites-available/default
+      tags:
+        - radius
+
+    - name: 'copy authorize site config'
+      copy:
+        src: files/raddb/mods-config/files/authorize
+        dest: /etc/raddb/mods-config/files/authorize
+      tags:
+        - radius
+
+    - name: 'copy clients config'
+      template:
+        src: templates/raddb/clients.conf.j2
+        dest: /etc/raddb/clients.conf
+      tags:
+        - radius
+        - clients.conf
+
+    - name: 'copy perl module config'
+      copy:
+        src: files/raddb/mods-available/perl
+        dest: /etc/raddb/mods-available/perl
+      tags:
+        - radius
+
+    - name: 'copy rbms_ldap.pl script'
+      template:
+        src: templates/raddb/mods-config/perl/rbms_ldap.pl.j2
+        dest: /etc/raddb/mods-config/perl/rbms_ldap.pl
+        owner: root
+        group: radiusd
+        mode: 0755
+      tags:
+        - radius
+        - script
+
+    - name: 'enable perl module'
+      file:
+        src: /etc/raddb/mods-available/perl
+        dest: /etc/raddb/mods-enabled/perl
+        state: link
+      tags:
+        - radius
+
+    - name: 'copy ldap module config'
+      template:
+        src: templates/raddb/mods-available/ldap
+        dest: /etc/raddb/mods-available/ldap
+      tags:
+        - radius
+
+    - name: 'enable ldap module'
+      file:
+        src: /etc/raddb/mods-available/ldap
+        dest: /etc/raddb/mods-enabled/ldap
+        state: link
+      tags:
+        - radius
+
+    - name: 'enable radiusd service'
+      systemd:
+        name: radiusd
+        enabled: yes
+        masked: no
+      tags:
+        - radius
+
+    - name: 'restart radiusd'
+      service: name=radiusd state=restarted
+      tags:
+        - radius
+
+    - name: 'copy keepalived.conf'
+      template:
+        src: templates/keepalived.conf.j2
+        dest: /etc/keepalived/keepalived.conf
+      tags:
+        - keepalived
+
+    - name: 'copy vrrp firewalld protocol config'
+      copy:
+        src: files/firewalld/services/vrrp.xml
+        dest: /etc/firewalld/services/vrrp.xml
+      tags:
+        - keepalived
+
+    - name: 'reload firewalld rules'
+      command: firewall-cmd --reload
+      tags:
+        - keepalived
+
+    - name: 'open vrrp service'
+      firewalld:
+        service: vrrp
+        permanent: yes
+        immediate: yes
+        state: enabled
+      tags:
+        - keepalived
+
+    - name: 'enable keepalived service'
+      systemd:
+        name: keepalived
+        enabled: yes
+        masked: no
+      tags:
+        - keepalived
+
+    - name: 'restart keepalived'
+      service: name=keepalived state=restarted
+      tags:
+        - keepalived
+
+    - name: 'copy peertest script'
+      template:
+        src: templates/peertest.sh.j2
+        dest: /root/peertest.sh
+        mode: 0771
+      tags:
+        - tools
+        - peertest
+
+    - name: 'copy rbmscli script'
+      template:
+        src: templates/rbmscli.j2
+        dest: /usr/local/bin/rbmscli
+        mode: 0755
+      tags:
+        - tools
+        - rbmscli
+
+    - name: 'copy rbmscli password'
+      template:
+        src: templates/rbmspass.j2
+        dest: /root/.rbmspass
+        mode: 0600
+      tags:
+        - tools
+        - rbmscli

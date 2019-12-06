@@ -1,0 +1,22 @@
+global_defs {
+   router_id {{ node_name }}
+   vrrp_skip_check_adv_addr
+   vrrp_strict
+   vrrp_garp_interval 0
+   vrrp_gna_interval 0
+}
+
+vrrp_instance VI_EXT {
+    state {{ vrrp_state }}
+    interface {{ vrrp_ext_if }}
+    virtual_router_id {{ vrrp_ext_vrid }}
+    priority {{ vrrp_priority }}
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{ vrrp_pass }}
+    }
+    virtual_ipaddress {
+        {{ vrrp_ext_vip }} dev {{ vrrp_ext_if }}
+    }
+}

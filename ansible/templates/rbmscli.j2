@@ -1,0 +1,197 @@
+#!/bin/sh
+
+#
+# (c)2019 by Pavel Burtovoy <pavel.burtovoy@burtovoy.su>
+#
+
+BIND_DN="cn=manager,{{ ldap_domain }}"
+BIND_PASS=$(cat ~/.rbmspass)
+BASE="ou=apn,{{ ldap_domain }}"
+APP=$(basename $0)
+
+_usage(){
+
+cat <<_EOL_
+
+Usage:
+
+    ${APP} --show --apn all
+    ${APP} --show --apn <apn.name>
+
+    ### Add APN.
+
+    ${APP} --add --apn <apn.name>
+
+    ### Add MSISDN with APN and route assigned to MSISDN.
+
+    ${APP} --add --apn <apn.name> --msisdn <msisdn>
+    ${APP} --add --apn <apn.name> --msisdn <msisdn> --route <route>
+
+    ### Add MS ip-address with APN and route assigned to this ip-address.
+
+    ${APP} --add --apn <apn.name> --nexthop <ms ip-address>
+    ${APP} --add --apn <apn.name> --nexthop <ms ip-address> --route <route>
+
+    ### Delete. All delete operations are recursive.
+
+    ${APP} --delete --apn <apn.name>
+    ${APP} --delete --apn <apn.name> --msisdn <msisdn>
+    ${APP} --delete --apn <apn.name> --msisdn <msisdn> --route <route>
+    ${APP} --delete --apn <apn.name> --nexthop <ms ip-address>
+    ${APP} --delete --apn <apn.name> --nexthop <ms ip-address> --route <route>
+
+_EOL_
+
+}
+
+TEMP=$(getopt -o sad --long show,add,delete,apn:,msisdn:,route:,nexthop: -- "$@")
+
+if [ $? != 0 ] ; then _usage >&2 ; exit 1 ; fi
+
+eval set -- "${TEMP}"
+
+CMD=usage
+APN=
+MSISDN=
+ROUTE=
+NEXTHOP=
+
+### Parse commandline options
+
+while true; do
+  case "$1" in
+    --apn )
+	    APN="$2"
+	    shift 2
+	    ;;
+    --msisdn )
+	    MSISDN="$2"
+	    shift 2
+	    ;;
+    --route )
+	    ROUTE="$2"
+	    shift 2
+	    ;;
+    --nexthop )
+	    NEXTHOP="$2"
+	    shift 2
+	    ;;
+    -s | --show )
+	    CMD=show
+	    shift
+	    ;;
+    -a | --add )
+	    CMD=add
+	    shift
+	    ;;
+    -d | --delete )
+	    CMD=delete
+	    shift
+	    ;;
+    *)
+	break
+	;;
+  esac
+done
+
+[ -z "${CMD}" ] && _usage && exit 1;
+
+if [ -n "${APN}" ]; then
+    if [ -n "${MSISDN}" ]; then
+	if [ -n "${ROUTE}" ]; then
+	    ### MSISDN Route
+	    case ${CMD} in
+		add)
+		    echo -e "dn: cn=${MSISDN},ou=msisdn,ou=${APN},${BASE}\nchangeType: modify\nadd: radiusFramedRoute\nradiusFramedRoute: ${ROUTE}" | \
+		    ldapmodify -x -D ${BIND_DN} -w  ${BIND_PASS} ; RETCODE=$?
+		    ;;
+		delete)
+		    echo -e "dn: cn=${MSISDN},ou=msisdn,ou=${APN},${BASE}\nchangeType: modify\ndelete: radiusFramedRoute\nradiusFramedRoute: ${ROUTE}" | \
+		    ldapmodify -x -D ${BIND_DN} -w  ${BIND_PASS} ; RETCODE=$?
+		    ;;
+		show)
+		    _usage
+		    ;;
+	    esac
+	else
+	    ### MSISDN
+	    case ${CMD} in
+		add)
+		    echo -e "dn: cn=${MSISDN},ou=msisdn,ou=${APN},${BASE}\nobjectClass: radiusObjectProfile\nobjectClass: top\nobjectClass: radiusprofile\ncn: ${MSISDN}\n\n" | \
+		    ldapadd -x -D ${BIND_DN} -w  ${BIND_PASS} ; RETCODE=$?
+		    ;;
+		delete)
+		    ldapdelete -x -D ${BIND_DN} -w ${BIND_PASS} -r cn=${MSISDN},ou=msisdn,ou=${APN},${BASE}
+		    RETCODE=$?
+		    ;;
+		show)
+		    _usage
+		    ;;
+	    esac
+	fi
+    elif [ -n "${NEXTHOP}" ]; then
+	if [ -n "${ROUTE}" ]; then
+	    ### Next-hop route
+	    case ${CMD} in
+		add)
+		    echo -e "dn: cn=${NEXTHOP},ou=route,ou=${APN},${BASE}\nchangeType: modify\nadd: radiusFramedRoute\nradiusFramedRoute: ${ROUTE}" | \
+		    ldapmodify -x -D ${BIND_DN} -w  ${BIND_PASS} ; RETCODE=$?
+		    ;;
+		delete)
+		    echo -e "dn: cn=${NEXTHOP},ou=route,ou=${APN},${BASE}\nchangeType: modify\ndelete: radiusFramedRoute\nradiusFramedRoute: ${ROUTE}" | \
+		    ldapmodify -x -D ${BIND_DN} -w  ${BIND_PASS} ; RETCODE=$?
+		    ;;
+		show)
+		    _usage
+		    ;;
+	    esac
+	else
+	    ### Next-hop
+	    case ${CMD} in
+		add)
+		    echo -e "dn: cn=${NEXTHOP},ou=route,ou=${APN},${BASE}\nobjectClass: radiusObjectProfile\nobjectClass: top\nobjectClass: radiusprofile\ncn: ${NEXTHOP}\n\n" | \
+		    ldapadd -x -D ${BIND_DN} -w  ${BIND_PASS} ; RETCODE=$?
+		    ;;
+		delete)
+		    ldapdelete -x -D ${BIND_DN} -w ${BIND_PASS} -r cn=${NEXTHOP},ou=route,ou=${APN},${BASE}
+		    RETCODE=$?
+		    ;;
+		show)
+		    _usage
+		    ;;
+	    esac
+	fi
+    else
+	### APN
+	case ${CMD} in
+	    show)
+		if [ "${APN}" = "all" ]; then
+		    ldapsearch -x -D ${BIND_DN} -w  ${BIND_PASS} -b ${BASE} -s one dn | egrep "^dn:" | sed -r 's/^dn: ou=|,ou=apn.*$//g' | sed -r 's/(.*)/apn \1/g'
+		    RETCODE=$?
+		else
+		    ldapsearch -x -D ${BIND_DN} -w  ${BIND_PASS} -b "ou=${APN},${BASE}" radiusFramedRoute radiusReplyAttribute | grep -v "#" | sed '/^$/d' | \
+		    sed -r "s/dn: ou=(${APN}),${BASE}/apn \1/g" | \
+		    sed -r "/dn: ou=(msisdn),ou=${APN},${BASE}/d" | \
+		    sed -r "s/dn: cn=(.*),ou=msisdn,ou=${APN},${BASE}/!\n \1/" | \
+		    sed -r 's/^.*Framed-Route = /  /g' | \
+		    sed -r "/dn: ou=(route),ou=${APN},${BASE}/d" | \
+		    sed -r "s/dn: cn=(.*),ou=route,ou=${APN},${BASE}/!\n \1/" | \
+		    sed -r 's/^radiusFramedRoute: /  /g' | \
+		    egrep -v "^search|^result"
+		    echo ""
+		    RETCODE=$?
+		fi
+		;;
+	    add)
+		echo -e "dn: ou=${APN},${BASE}\nobjectClass: organizationalUnit\nobjectClass: top\nou: ${APN}\n\ndn: ou=msisdn,ou=${APN},${BASE}\nobjectClass: organizationalUnit\nou: msisdn\n\ndn: ou=route,ou=${APN},${BASE}\nobjectClass: organizationalUnit\nou: route\n\n" | \
+		ldapadd -x -D ${BIND_DN} -w  ${BIND_PASS} ; RETCODE=$?
+		;;
+	    delete)
+		ldapdelete -x -D ${BIND_DN} -w ${BIND_PASS} -r ou=${APN},${BASE}
+		RETCODE=$?
+		;;
+	esac
+    fi
+else
+    _usage
+fi
